@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/govuk-one-login/quality-gates/refs/tags/v0.14.0/schemas/schema.json",
+  "$schema": "https://raw.githubusercontent.com/govuk-one-login/quality-gates/refs/tags/v0.15.0/schemas/schema.json",
   "services": [
     {
       "product": "CRI Common",
@@ -7,75 +7,97 @@
       "promotionType": "library",
       "automated": [
         {
-          "checkTypes": [
-            "code style and linting",
-            "secret scanning"
-          ],
           "phase": "pre-merge",
           "provider": "GitHub",
           "config": {
             "file": ".github/workflows/run-pre-commit.yml",
             "path": "$.jobs.pre-commit"
-          }
+          },
+          "checks": [
+            {
+              "name": "code style and linting"
+            },
+            {
+              "name": "secret scanning"
+            }
+          ]
         },
         {
-          "checkTypes": [
-            "unit"
-          ],
           "phase": "pre-merge",
           "provider": "GitHub",
           "config": {
             "file": ".github/workflows/run-unit-tests.yml",
             "path": "$.jobs.run-unit-tests"
-          }
+          },
+          "checks": [
+            {
+              "name": "unit"
+            }
+          ]
         },
         {
-          "checkTypes": [
-            "contract"
-          ],
           "phase": "pre-merge",
           "provider": "GitHub",
           "config": {
             "file": ".github/workflows/run-contract-tests.yml",
             "path": "$.jobs.run-contract-tests"
-          }
+          },
+          "checks": [
+            {
+              "name": "contract"
+            }
+          ]
         },
         {
-          "checkTypes": [
-            "integration",
-            "regression",
-            "new feature"
-          ],
           "phase": "pre-merge",
           "provider": "GitHub",
           "config": {
             "file": ".github/workflows/pre-merge-workflow.yml",
             "path": "$.jobs.integration-tests"
-          }
+          },
+          "checks": [
+            {
+              "name": "integration"
+            },
+            {
+              "name": "regression"
+            },
+            {
+              "name": "new feature"
+            }
+          ]
         },
         {
-          "checkTypes": [
-            "code style and linting",
-            "unit test coverage",
-            "vulnerability detection"
-          ],
           "phase": "pre-merge",
           "provider": "GitHub",
           "config": {
             "file": ".github/workflows/run-sonarcloud.yml",
             "path": "$.jobs.sonarcloud"
-          }
+          },
+          "checks": [
+            {
+              "name": "code style and linting"
+            },
+            {
+              "name": "unit test coverage"
+            },
+            {
+              "name": "vulnerability detection"
+            }
+          ]
         },
         {
-          "checkTypes": [
-            "vulnerability detection"
-          ],
           "phase": "pre-merge",
           "provider": "GitHub",
           "config": {
             "file": ".github/workflows/run-codeql.yml",
             "path": "$.jobs.codeql"
-          }
+          },
+          "checks": [
+            {
+              "name": "vulnerability detection"
+            }
+          ]
         }
       ]
     }
