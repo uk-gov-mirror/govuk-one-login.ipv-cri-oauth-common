@@ -1003,6 +1003,172 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
+  RetrieveSessionFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-RetrieveSessionFn"
+      DeploymentPreference:
+        Type: !Ref LambdaDeploymentPreference
+        Role: !GetAtt CodeDeployServiceRole.Arn
+        Alarms: !If
+          - IsCanaryDeployment
+          - [!Ref RetrieveSessionFnLambdaErrors, !Ref RetrieveSessionFnCanary5xxErrors]
+          - [!Ref AWS::NoValue]
+      CodeUri: ../lambdas
+      Handler: retrieve-session-handler.lambdaHandler
+      Runtime: nodejs22.x
+      Layers:
+        - arn:aws:lambda:eu-west-2:216552277552:layer:Dynatrace_OneAgent_1_313_2_20250404-043044_with_collector_nodejs:1
+      VpcConfig:
+        SubnetIds: !If
+          - IsDevPlatformDeploy
+          - [
+              Fn::ImportValue: !Sub "${VpcStackNameOverride}-ProtectedSubnetIdA",
+              Fn::ImportValue: !Sub "${VpcStackNameOverride}-ProtectedSubnetIdB",
+            ]
+          - !Split [",", Fn::ImportValue: !Sub "${VpcStackNameOverride}-PrivateSubnets"]
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: !Sub "${CriIdentifier}-retrieve-session"
+          SESSION_TABLE: !If
+            - IsUsingCommonLambdasTables
+            - !Sub "{{resolve:ssm:/${CommonLambdasStackName}/SessionTableName}}"
+            - !Ref SessionTable
+      AutoPublishAlias: live
+      AutoPublishAliasAllProperties: true
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSXrayWriteOnlyAccess
+        - DynamoDBReadPolicy:
+            TableName: !Ref SessionTable
+        - !If
+          - IsUsingCommonLambdasTables
+          - DynamoDBReadPolicy:
+              TableName: !Sub "{{resolve:ssm:/${CommonLambdasStackName}/SessionTableName}}"
+          - !Ref AWS::NoValue
+        - KMSDecryptPolicy:
+            KeyId: !Ref DynamoTablesEncryptionKey
+        - !If
+          - IsCommonLambdasUsingCMK
+          - KMSDecryptPolicy:
+              KeyId: !Sub "{{resolve:ssm:/${CommonLambdasStackName}/DynamoDBCustomerManagedKeyID}}"
+          - !Ref AWS::NoValue
+        - Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameters
+            Resource:
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/SessionTableName"
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/SessionTtl"
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/clients/*"
+      ProvisionedConcurrencyConfig: !If
+        - IsProvisionedConcurrencyEnabled
+        - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrentExecutions
+        - !Ref AWS::NoValue
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Format: esm
+        Minify: true
+        Target: es2022
+        Sourcemap: true # Enabling source maps will create the required NODE_OPTIONS environment variables on your lambda function during sam build
+        OutExtension:
+          - .js=.mjs
+        Banner:
+          - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
+        EntryPoints:
+          - src/handlers/retrieve-session-handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  RetrieveSessionFnLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${RetrieveSessionFn}"
+      RetentionInDays: 30
+
+  RetrieveSessionFnLogGroupSubscriptionFilterCSLS:
+    Type: AWS::Logs::SubscriptionFilter
+    Condition: IsCSLSEnabled
+    Properties:
+      DestinationArn: !Ref CSLSDestinationArn
+      FilterPattern: ""
+      LogGroupName: !Ref RetrieveSessionFnLogGroup
+
+  RetrieveSessionFnPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt RetrieveSessionFn.Arn
+      Principal: apigateway.amazonaws.com
+      SourceAccount: !Sub "${AWS::AccountId}"
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${CriPrivateApiGatewayID}/*/*/*"
+
+  RetrieveSessionFnAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RetrieveSessionFn.Alias
+      Principal: apigateway.amazonaws.com
+      SourceAccount: !Sub "${AWS::AccountId}"
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${CriPrivateApiGatewayID}/*/*/*"
+
+  RetrieveSessionFnLambdaErrors:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsCanaryDeployment
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-SessionUpdateFunctionLambdaErrors"
+      AlarmDescription: !Sub "Trigger an alarm when lambda errors occurs"
+      ActionsEnabled: true
+      AlarmActions:
+        - Fn::ImportValue: !Sub "${BuildNotificationStackName}-WarningAlertsTopicArn"
+      OKActions:
+        - Fn::ImportValue: !Sub "${BuildNotificationStackName}-WarningAlertsTopicArn"
+      InsufficientDataActions: []
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Dimensions:
+        - Name: Resource
+          Value: !Sub "${AWS::StackName}-RetrieveSessionFn:live"
+        - Name: ExecutedVersion
+          Value: !Sub RetrieveSessionFn.Version.Version
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  RetrieveSessionFnCanary5xxErrors:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsCanaryDeployment
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+        - Fn::ImportValue: !Sub "${BuildNotificationStackName}-WarningAlertsTopicArn"
+      OKActions:
+        - Fn::ImportValue: !Sub "${BuildNotificationStackName}-WarningAlertsTopicArn"
+      AlarmName: !Sub "${AWS::StackName}-SessionUpdateFunctionCanary5xxErrors"
+      AlarmDescription: !Sub "SessionUpdateFunction Lambda returning 5xx response."
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: Method
+          Value: POST
+        - Name: ApiName
+          Value: !Ref CriPrivateApiGwName
+        - Name: Stage
+          Value: !Ref Environment
+        - Name: Resource
+          Value: /session
+      Statistic: Sum
+      Unit: Count
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
   DynamoTablesEncryptionKey:
     Type: AWS::KMS::Key
     Properties:
@@ -1729,6 +1895,35 @@ Resources:
                 passthroughBehavior: "when_no_match"
 
           /session:
+            get:
+              parameters:
+                - $ref: "#/components/parameters/SessionHeader"
+              responses:
+                "200":
+                  description: "200 response"
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/Session"
+                "400":
+                  description: "400 response"
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/Error"
+                "500":
+                  description: "500 response"
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "#/components/schemas/Error"
+              x-amazon-apigateway-request-validator: "Validate both"
+              x-amazon-apigateway-integration:
+                type: "aws_proxy"
+                httpMethod: "POST"
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RetrieveSessionFn.Arn}/invocations
+                passthroughBehavior: "when_no_match"
             post:
               parameters:
                 - $ref: "#/components/parameters/AuditHeader"
@@ -1951,6 +2146,9 @@ Outputs:
   LambdaSessionFunctionName:
     Description: The name of the session function
     Value: !Ref SessionFn
+  LambdaSessionUpdateFunctionName:
+    Description: The name of the session update function
+    Value: !Ref RetrieveSessionFn
   LambdaAuthorizationFunctionName:
     Description: The name of the authorisation function
     Value: !Ref AuthorizationFn
