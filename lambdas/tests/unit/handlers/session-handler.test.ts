@@ -16,6 +16,7 @@ import {
 import { SessionService } from "../../../src/services/session-service";
 import { GenericServerError, SessionValidationError } from "../../../src/common/utils/errors";
 import { JWTPayload } from "jose";
+import { A_STORAGE_ACCESS_TOKEN } from "../fixtures/storage-access-token";
 import initialiseConfigMiddleware from "../../../src/middlewares/config/initialise-config-middleware";
 import errorMiddleware from "../../../src/middlewares/error/error-middleware";
 import decryptJweMiddleware from "../../../src/middlewares/jwt/decrypt-jwe-middleware";
@@ -336,6 +337,95 @@ describe("SessionLambda", () => {
             subject: "test-sub",
         };
         expect(spy).toHaveBeenCalledWith(expectedSessionRequestSummary);
+    });
+
+    it("should get the IPV claims out of an IPV request and onto the session", async () => {
+        vi.spyOn(sessionRequestValidator.prototype, "validateJwt").mockResolvedValue({
+            client_id: "test-client-id",
+            govuk_signin_journey_id: "test-journey-id",
+            persistent_session_id: "test-persistent-session-id",
+            redirect_uri: "test-redirect-uri",
+            state: "test-state",
+            sub: "test-sub",
+            vtr: ["P2"],
+            claims: {
+                userinfo: {
+                    "https://vocab.account.gov.uk/v1/coreIdentityJWT": { essential: true },
+                    "https://vocab.account.gov.uk/v1/storageAccessToken": {
+                        values: [A_STORAGE_ACCESS_TOKEN],
+                    },
+                },
+            },
+        } as JWTPayload);
+        const spy = vi.spyOn(sessionService.prototype, "saveSession");
+
+        await lambdaHandler(mockEvent, {} as Context);
+
+        expect(spy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                vtr: ["P2"],
+                storageAccessToken: A_STORAGE_ACCESS_TOKEN,
+            }),
+        );
+    });
+
+    it("should leave the IPV claims off the session for a CRI request", async () => {
+        const spy = vi.spyOn(sessionService.prototype, "saveSession");
+
+        await lambdaHandler(mockEvent, {} as Context);
+
+        expect(spy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                vtr: undefined,
+                storageAccessToken: undefined,
+            }),
+        );
+    });
+
+    it("should store vtr on its own when no storage access token was sent", async () => {
+        vi.spyOn(sessionRequestValidator.prototype, "validateJwt").mockResolvedValue({
+            client_id: "test-client-id",
+            redirect_uri: "test-redirect-uri",
+            state: "test-state",
+            sub: "test-sub",
+            vtr: ["P2"],
+        } as JWTPayload);
+        const spy = vi.spyOn(sessionService.prototype, "saveSession");
+
+        await lambdaHandler(mockEvent, {} as Context);
+
+        expect(spy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                vtr: ["P2"],
+                storageAccessToken: undefined,
+            }),
+        );
+    });
+
+    it("should store the storage access token on its own when no vtr was sent", async () => {
+        vi.spyOn(sessionRequestValidator.prototype, "validateJwt").mockResolvedValue({
+            client_id: "test-client-id",
+            redirect_uri: "test-redirect-uri",
+            state: "test-state",
+            sub: "test-sub",
+            claims: {
+                userinfo: {
+                    "https://vocab.account.gov.uk/v1/storageAccessToken": {
+                        values: [A_STORAGE_ACCESS_TOKEN],
+                    },
+                },
+            },
+        } as JWTPayload);
+        const spy = vi.spyOn(sessionService.prototype, "saveSession");
+
+        await lambdaHandler(mockEvent, {} as Context);
+
+        expect(spy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                vtr: undefined,
+                storageAccessToken: A_STORAGE_ACCESS_TOKEN,
+            }),
+        );
     });
 
     it("should save the personal identity information", async () => {

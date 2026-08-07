@@ -5,6 +5,40 @@ import { ClientConfigKey } from "../types/config-keys";
 import { Logger } from "@aws-lambda-powertools/logger";
 import { SessionValidationError } from "../common/utils/errors";
 import { EvidenceRequestSchema } from "../schemas/evidence-request.schema";
+import {
+    getStorageAccessTokenClaim,
+    STORAGE_ACCESS_TOKEN_CLAIM,
+    StorageAccessTokenClaimSchema,
+    VtrSchema,
+} from "../schemas/ipv-request.schema";
+import { ZodError, ZodType } from "zod";
+
+type ZodIssue = ZodError["issues"][number];
+
+const describeIssue = (issue: ZodIssue, claimName?: string): string => {
+    const path = [...issue.path];
+
+    if (claimName) {
+        path.unshift(claimName);
+    }
+
+    return `${path.join(".")} - ${issue.message}`;
+};
+
+const describeIssues = (issues: readonly ZodIssue[], claimName?: string): string => {
+    const described = issues.map((issue) => {
+        return describeIssue(issue, claimName);
+    });
+
+    return described.join(", ");
+};
+
+const missingClaimError = (claimName: string): SessionValidationError => {
+    return new SessionValidationError(
+        "Session Validation Exception",
+        `Invalid request: ${claimName} claim is required and was not provided in the request`,
+    );
+};
 
 export class SessionRequestValidator {
     constructor(
@@ -21,6 +55,8 @@ export class SessionRequestValidator {
         if (payload["evidence_requested"] !== undefined) {
             this.validateEvidenceRequested(payload["evidence_requested"]);
         }
+
+        this.validateIpvClaims(payload);
 
         if (payload.client_id !== requestBodyClientId) {
             throw new SessionValidationError(
@@ -45,10 +81,39 @@ export class SessionRequestValidator {
     }
 
     private validateEvidenceRequested(evidenceRequestedRaw: unknown): void {
-        const result = EvidenceRequestSchema.safeParse(evidenceRequestedRaw);
+        this.parseClaim(EvidenceRequestSchema, evidenceRequestedRaw);
+    }
+
+    private validateIpvClaims(payload: JWTPayload): void {
+        this.validateIpvClaim(VtrSchema, payload["vtr"], "vtr");
+
+        this.validateIpvClaim(
+            StorageAccessTokenClaimSchema,
+            getStorageAccessTokenClaim(payload),
+            STORAGE_ACCESS_TOKEN_CLAIM,
+        );
+    }
+
+    private validateIpvClaim(schema: ZodType, claim: unknown, claimName: string): void {
+        if (claim !== undefined) {
+            this.parseClaim(schema, claim, claimName);
+
+            return;
+        }
+
+        if (this.validationConfig.ipvClaimsRequired) {
+            throw missingClaimError(claimName);
+        }
+    }
+
+    private parseClaim(schema: ZodType, claim: unknown, claimName?: string): void {
+        const result = schema.safeParse(claim);
+
         if (!result.success) {
-            const errors = result.error.issues.map((issue) => `${issue.path.join(".")} - ${issue.message}`).join(", ");
-            throw new SessionValidationError("Session Validation Exception", `Invalid request: ${errors}`);
+            throw new SessionValidationError(
+                "Session Validation Exception",
+                `Invalid request: ${describeIssues(result.error.issues, claimName)}`,
+            );
         }
     }
 
@@ -80,13 +145,17 @@ export class SessionRequestValidator {
 }
 
 export class SessionRequestValidatorFactory {
-    constructor(private readonly logger: Logger) {}
+    constructor(
+        private readonly logger: Logger,
+        private readonly ipvClaimsRequired: boolean = false,
+    ) {}
     public create(criClientConfig: Map<string, string>): SessionRequestValidator {
         return new SessionRequestValidator(
             {
                 expectedJwtRedirectUri: criClientConfig.get(ClientConfigKey.JWT_REDIRECT_URI) as string,
                 expectedJwtIssuer: criClientConfig.get(ClientConfigKey.JWT_ISSUER) as string,
                 expectedJwtAudience: criClientConfig.get(ClientConfigKey.JWT_AUDIENCE) as string,
+                ipvClaimsRequired: this.ipvClaimsRequired,
             },
             new JwtVerifier(
                 {

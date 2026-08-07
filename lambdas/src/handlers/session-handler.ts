@@ -27,6 +27,7 @@ import { logger } from "@govuk-one-login/cri-logger";
 import { SessionItem } from "@govuk-one-login/cri-types";
 import { CriAuditConfig } from "../types/cri-audit-config";
 import { EvidenceRequest } from "../schemas/evidence-request.schema";
+import { getStorageAccessToken, Vtr } from "../schemas/ipv-request.schema";
 import { captureMetric, metrics } from "@govuk-one-login/cri-metrics";
 
 const dynamoDbClient = createClient(AwsClientType.DYNAMO);
@@ -112,6 +113,8 @@ export class SessionLambda implements LambdaInterface {
             subject: jwtPayload.sub as string,
             evidenceRequested: jwtPayload["evidence_requested"] as EvidenceRequest,
             context: jwtPayload["context"] as string,
+            vtr: jwtPayload["vtr"] as Vtr,
+            storageAccessToken: getStorageAccessToken(jwtPayload),
         };
     }
 }
@@ -119,7 +122,8 @@ export class SessionLambda implements LambdaInterface {
 const ssmClient = createClient(AwsClientType.SSM);
 const configService = new ConfigService(new SSMProvider({ awsSdkV3Client: ssmClient }));
 const jweDecrypter = new JweDecrypter(kmsClient, () => configService.getConfigEntry(CommonConfigKey.DECRYPTION_KEY_ID));
-const jwtValidatorFactory = new SessionRequestValidatorFactory(logger);
+const ipvClaimsRequired = process.env.ENV_VAR_AUTHORIZATION_REQUEST_TYPE === "IPV";
+const jwtValidatorFactory = new SessionRequestValidatorFactory(logger, ipvClaimsRequired);
 const handlerClass = new SessionLambda(
     new SessionService(dynamoDbClient, configService),
     new PersonIdentityService(dynamoDbClient, configService),

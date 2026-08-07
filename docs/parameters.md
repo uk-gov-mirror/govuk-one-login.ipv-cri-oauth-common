@@ -6,6 +6,7 @@
 |----------|----------|-----------------------|--------------------------------------------------------------------------------|---------|
 | AuditEventNamePrefix | Yes      | -                     | The audit event name prefix                                                    | `IPV_HMRC_RECORD_CHECK_CRI` |
 | AuditTxmaStackName | No       | `txma-infrastructure` | The stack containing the TXMA infrastructure                                   | `txma-infrastructure` |
+| AuthorizationRequestType | No | `CRI` | Whether the stack serves `CRI` or `IPV` authorisation requests | `IPV` |
 | BuildNotificationStackName | No       | `build-notifications` | The stack containing the topic to publish notification and sns alerts          | `build-notifications` |
 | CommonLambdasStackName | No | `""` | For migration only - Existing common-lambdas stack name, to allow the use common-lambdas tables during a migration. | `common-cri-api` |
 | CommonLambdasUsesCMK | No | `false` |  For migration only - Does the common-lambdas stack in the account use a CMK for its databases. | `true` |

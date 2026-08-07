@@ -12,6 +12,7 @@ import { SessionRequestSummary } from "../types/session-request-summary";
 import { CommonConfigKey } from "../types/config-keys";
 import { SessionItem, UnixMillisecondsTimestamp, UnixSecondsTimestamp } from "@govuk-one-login/cri-types";
 import { msToSeconds } from "../common/utils/time-utils";
+import { OAuthSessionItem } from "../types/oauth-session-item";
 
 export class SessionService {
     constructor(
@@ -19,7 +20,7 @@ export class SessionService {
         private readonly configService: ConfigService,
     ) {}
 
-    public async getSession(sessionId: string | undefined): Promise<SessionItem> {
+    public async getSession(sessionId: string | undefined): Promise<OAuthSessionItem> {
         const getSessionCommand = new GetCommand({
             TableName: this.getSessionTableName(),
             Key: {
@@ -30,7 +31,7 @@ export class SessionService {
         if (!result.Item) {
             throw new SessionNotFoundError(`Could not find session item with id: ${sessionId}`);
         }
-        return result.Item as SessionItem;
+        return result.Item as OAuthSessionItem;
     }
 
     public async createAuthorizationCode(sessionItem: SessionItem) {
@@ -95,9 +96,9 @@ export class SessionService {
         await this.dynamoDbClient.send(updateSessionCommand);
     }
 
-    public async saveSession(sessionRequest: SessionRequestSummary): Promise<SessionItem> {
+    public async saveSession(sessionRequest: SessionRequestSummary): Promise<OAuthSessionItem> {
         const sessionExpirationEpoch = this.configService.getSessionExpirationEpoch();
-        const sessionItem: SessionItem = {
+        const sessionItem: OAuthSessionItem = {
             sessionId: randomUUID(),
             createdDate: Date.now() as UnixMillisecondsTimestamp,
             expiryDate: sessionExpirationEpoch as UnixSecondsTimestamp,
@@ -111,6 +112,8 @@ export class SessionService {
             attemptCount: 0,
             evidenceRequest: sessionRequest.evidenceRequested,
             context: sessionRequest.context,
+            vtr: sessionRequest.vtr,
+            storageAccessToken: sessionRequest.storageAccessToken,
         };
         const putSessionCommand = new PutCommand({
             TableName: this.configService.getConfigEntry(CommonConfigKey.SESSION_TABLE_NAME),

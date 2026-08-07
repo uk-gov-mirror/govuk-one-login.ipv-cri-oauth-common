@@ -3,6 +3,7 @@ import { ConfigService } from "../../../src/common/config/config-service";
 import { DynamoDBDocument } from "@aws-sdk/lib-dynamodb";
 import { InvalidAccessTokenError, SessionNotFoundError } from "../../../src/common/utils/errors";
 import { SessionItem, UnixSecondsTimestamp } from "@govuk-one-login/cri-types";
+import { Vtr } from "../../../src/schemas/ipv-request.schema";
 import { SSMProvider } from "@aws-lambda-powertools/parameters/ssm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -307,6 +308,59 @@ describe("session-service", () => {
             );
 
             expect(output.sessionId).toEqual(expect.stringMatching(UUID_REGEX));
+        });
+
+        it("should save the IPV claims from an IPV request", async () => {
+            const mockSessionRequestSummary = {
+                clientId: "test-jwt-client-id",
+                clientIpAddress: "test-client-ip-address",
+                clientSessionId: "test-journey-id",
+                persistentSessionId: "test-persistent-session-id",
+                redirectUri: "test-redirect-uri",
+                state: "test-state",
+                subject: "test-sub",
+                vtr: ["P2"] as Vtr,
+                storageAccessToken: "header.payload.signature",
+            };
+
+            vi.spyOn(global.Date, "now").mockReturnValueOnce(1675382400000);
+            vi.spyOn(configService, "getSessionExpirationEpoch").mockReturnValue(1675382500000 as UnixSecondsTimestamp);
+            vi.spyOn(configService, "getConfigEntry").mockReturnValue("session-table-name");
+            const output = await sessionService.saveSession(mockSessionRequestSummary);
+
+            expect(mockDynamoDbClient.prototype.send).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    input: expect.objectContaining({
+                        Item: expect.objectContaining({
+                            vtr: ["P2"],
+                            storageAccessToken: "header.payload.signature",
+                        }),
+                    }),
+                }),
+            );
+
+            expect(output.vtr).toEqual(["P2"]);
+            expect(output.storageAccessToken).toBe("header.payload.signature");
+        });
+
+        it("should leave the IPV claims off the session for a CRI request", async () => {
+            const mockSessionRequestSummary = {
+                clientId: "test-jwt-client-id",
+                clientIpAddress: "test-client-ip-address",
+                clientSessionId: "test-journey-id",
+                persistentSessionId: "test-persistent-session-id",
+                redirectUri: "test-redirect-uri",
+                state: "test-state",
+                subject: "test-sub",
+            };
+
+            vi.spyOn(global.Date, "now").mockReturnValueOnce(1675382400000);
+            vi.spyOn(configService, "getSessionExpirationEpoch").mockReturnValue(1675382500000 as UnixSecondsTimestamp);
+            vi.spyOn(configService, "getConfigEntry").mockReturnValue("session-table-name");
+            const output = await sessionService.saveSession(mockSessionRequestSummary);
+
+            expect(output.vtr).toBeUndefined();
+            expect(output.storageAccessToken).toBeUndefined();
         });
     });
 });

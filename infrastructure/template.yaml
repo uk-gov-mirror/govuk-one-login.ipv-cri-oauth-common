@@ -9,7 +9,7 @@ Metadata:
     SpdxLicenseId: MIT
     LicenseUrl: ../LICENSE
     HomePageUrl: https://github.com/govuk-one-login/ipv-cri-oauth-common
-    SemanticVersion: 1.0.0
+    SemanticVersion: 1.1.0
     SourceCodeUrl: https://github.com/govuk-one-login/ipv-cri-oauth-common
 
 Parameters:
@@ -22,6 +22,16 @@ Parameters:
     Type: String
     Description: The stack containing the TXMA infrastructure
     Default: "txma-infrastructure"
+
+  AuthorizationRequestType:
+    Type: String
+    Description: >
+      Whether this stack serves CRI or IPV requests. IPV makes the vtr and storage
+      access token claims mandatory.
+    Default: "CRI"
+    AllowedValues:
+      - "CRI"
+      - "IPV"
 
   BuildNotificationStackName:
     Description: The topic to publish notification and sns alerts
@@ -218,6 +228,8 @@ Conditions:
     - !Condition IsNotProd
     - !Condition IsStubJwksPresent
 
+  IsIpvAuthorizationRequest: !Equals [!Ref AuthorizationRequestType, "IPV"]
+
   IsCodeSigningEnabled: !Not
     - !Equals [!Ref LambdaCodeSigningConfigArn, "none"]
   IsPermissionsBoundaryEnabled: !Not
@@ -323,6 +335,7 @@ Resources:
           CRI_IDENTIFIER: !Sub "${CriIdentifier}"
           ENV_VAR_FEATURE_FLAG_KEY_ROTATION: !Ref KeyRotation
           ENV_VAR_FEATURE_FLAG_KEY_ROTATION_LEGACY_KEY_FALLBACK: !Ref KeyRotationFallback
+          ENV_VAR_AUTHORIZATION_REQUEST_TYPE: !Ref AuthorizationRequestType
           SESSION_TABLE: !If
             - IsUsingCommonLambdasTables
             - !Sub "{{resolve:ssm:/${CommonLambdasStackName}/SessionTableName}}"
@@ -1059,6 +1072,10 @@ Resources:
               - "sessionId"
               - "redirectUri"
               - "clientId"
+              - !If
+                - IsIpvAuthorizationRequest
+                - "storageAccessToken"
+                - !Ref "AWS::NoValue"
             ProjectionType: "INCLUDE"
         - IndexName: "access-token-index"
           KeySchema:

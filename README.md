@@ -25,6 +25,7 @@ If you change any of the stack parameters that have a knock-on effect to the Lam
 ### Impacted CF Parameters;
 - `AuditEventNamePrefix`
 - `AuditTxmaStackName`
+- `AuthorizationRequestType`
 - `CommonLambdasStackName`
 - `CommonLambdasUsesCMK`
 - `CriIdentifier`
