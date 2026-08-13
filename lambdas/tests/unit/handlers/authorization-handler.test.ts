@@ -59,25 +59,71 @@ const AUTHORIZATION_SENT_METRIC = "authorization_sent";
 describe("authorization-handler.ts", () => {
     const mockDynamoDbClient = vi.mocked(DynamoDBDocument);
     const metricsSpy = vi.mocked(captureMetric);
+    const configService = new ConfigService(vi.fn() as unknown as SSMProvider);
+    const sessionService = new SessionService(mockDynamoDbClient.prototype, configService);
+    const authorizationRequestValidator = new AuthorizationRequestValidator();
+    const mockConfigService = vi.mocked(ConfigService);
+
+    const sessionItem: Partial<SessionItem> = {
+        sessionId: "abc",
+        authorizationCodeExpiryDate: 1 as UnixSecondsTimestamp,
+        clientId: "1",
+        clientSessionId: "1",
+        redirectUri: "http://123.com",
+        state: "session-state-value",
+        accessToken: "",
+        accessTokenExpiryDate: 0 as UnixSecondsTimestamp,
+        authorizationCode: "abc",
+    };
+
+    const buildLambdaHandler = () => {
+        const handlerClass = new AuthorizationLambda(authorizationRequestValidator);
+        return middy(handlerClass.handler.bind(handlerClass))
+            .use(
+                errorMiddleware(logger, {
+                    metric_name: AUTHORIZATION_SENT_METRIC,
+                    message: "Authorization Lambda error occurred",
+                }),
+            )
+            .use(injectLambdaContext(logger, { clearState: true }))
+            .use(
+                initialiseConfigMiddleware({
+                    configService: configService,
+                    config_keys: [CommonConfigKey.SESSION_TABLE_NAME],
+                }),
+            )
+            .use(getSessionByIdMiddleware({ sessionService: sessionService }))
+            .use(
+                initialiseClientConfigMiddleware({
+                    configService: configService,
+                    client_config_keys: [ClientConfigKey.JWT_REDIRECT_URI],
+                }),
+            )
+            .use(setGovUkSigningJourneyIdMiddleware(logger))
+            .use(setRequestedVerificationScoreMiddleware(logger));
+    };
 
     beforeEach(() => {
         vi.resetAllMocks();
+        delete process.env.ENV_VAR_AUTHORIZATION_REQUEST_TYPE;
         const impl = () => vi.fn().mockImplementation(() => Promise.resolve({ Parameters: [] }));
         mockDynamoDbClient.prototype.send = impl();
         mockDynamoDbClient.prototype.query = impl();
+        configService.init = () => Promise.resolve();
+        vi.spyOn(sessionService, "getSession").mockResolvedValue(sessionItem as SessionItem);
+        const clientConfig = new Map<string, string>();
+        clientConfig.set("code", "abc");
+        clientConfig.set("redirectUri", "http://123.com");
+        vi.spyOn(mockConfigService.prototype, "getClientConfig").mockReturnValue(clientConfig);
     });
 
-    describe("Handler", () => {
+    describe("Authorization handler with the Authorization Request Type feature flag set to CRI", () => {
         let body = {};
         let headers = {};
-        let authorizationHandlerLambda: AuthorizationLambda;
         let lambdaHandler: middy.MiddyfiedHandler;
-        const configService = new ConfigService(vi.fn() as unknown as SSMProvider);
-        const sessionService = new SessionService(mockDynamoDbClient.prototype, configService);
-        const authorizationRequestValidator = new AuthorizationRequestValidator();
-        const mockConfigService = vi.mocked(ConfigService);
 
         beforeEach(() => {
+            process.env.ENV_VAR_AUTHORIZATION_REQUEST_TYPE = "CRI";
             body = {
                 code: "",
                 grant_type: "authorization_code",
@@ -88,48 +134,7 @@ describe("authorization-handler.ts", () => {
             headers = {
                 "session-id": "1",
             } as APIGatewayProxyEventHeaders;
-            vi.resetAllMocks();
-            configService.init = () => Promise.resolve();
-            authorizationHandlerLambda = new AuthorizationLambda(authorizationRequestValidator);
-            lambdaHandler = middy(authorizationHandlerLambda.handler.bind(authorizationHandlerLambda))
-                .use(
-                    errorMiddleware(logger, {
-                        metric_name: AUTHORIZATION_SENT_METRIC,
-                        message: "Authorization Lambda error occurred",
-                    }),
-                )
-                .use(injectLambdaContext(logger, { clearState: true }))
-                .use(
-                    initialiseConfigMiddleware({
-                        configService: configService,
-                        config_keys: [CommonConfigKey.SESSION_TABLE_NAME],
-                    }),
-                )
-                .use(getSessionByIdMiddleware({ sessionService: sessionService }))
-                .use(
-                    initialiseClientConfigMiddleware({
-                        configService: configService,
-                        client_config_keys: [ClientConfigKey.JWT_REDIRECT_URI],
-                    }),
-                )
-                .use(setGovUkSigningJourneyIdMiddleware(logger))
-                .use(setRequestedVerificationScoreMiddleware(logger));
-
-            const sessionItem: Partial<SessionItem> = {
-                sessionId: "abc",
-                authorizationCodeExpiryDate: 1 as UnixSecondsTimestamp,
-                clientId: "1",
-                clientSessionId: "1",
-                redirectUri: "http://123.com",
-                accessToken: "",
-                accessTokenExpiryDate: 0 as UnixSecondsTimestamp,
-                authorizationCode: "abc",
-            };
-            vi.spyOn(sessionService, "getSession").mockReturnValue(Promise.resolve(sessionItem as SessionItem));
-            const clientConfig = new Map<string, string>();
-            clientConfig.set("code", "abc");
-            clientConfig.set("redirectUri", "http://123.com");
-            vi.spyOn(mockConfigService.prototype, "getClientConfig").mockReturnValueOnce(clientConfig);
+            lambdaHandler = buildLambdaHandler();
         });
 
         describe("has queryStringParameters parameters all populated", () => {
@@ -182,18 +187,12 @@ describe("authorization-handler.ts", () => {
 
         describe("authorization request returns access_denied", () => {
             let loggerSpyError: MockInstance;
-            const sessionItem: Partial<SessionItem> = {
-                sessionId: "abc",
-                authorizationCodeExpiryDate: 1 as UnixSecondsTimestamp,
-                clientId: "1",
-                clientSessionId: "1",
-                redirectUri: "http://123.com",
-                accessTokenExpiryDate: 0 as UnixSecondsTimestamp,
-                authorizationCode: undefined,
-            };
             beforeEach(() => {
                 loggerSpyError = vi.spyOn(logger, "error");
-                vi.spyOn(sessionService, "getSession").mockReturnValueOnce(Promise.resolve(sessionItem as SessionItem));
+                vi.spyOn(sessionService, "getSession").mockResolvedValueOnce({
+                    ...sessionItem,
+                    authorizationCode: undefined,
+                } as SessionItem);
             });
             it("should return 403 status code and return body with access_denied", async () => {
                 const result = await lambdaHandler(
@@ -280,7 +279,7 @@ describe("authorization-handler.ts", () => {
                 );
                 expect(metricsSpy).toHaveBeenCalledWith("authorization_sent", 0);
             });
-            it("should fail validation should fail when the client_id is missing", async () => {
+            it("should fail validation when the client_id is missing from queryString", async () => {
                 const queryString = {
                     redirect_uri: "http://123.com",
                     response_type: "test",
@@ -307,7 +306,7 @@ describe("authorization-handler.ts", () => {
         });
 
         describe("has session present", () => {
-            it("should should fail when there is no session-id in the authorization request header", async () => {
+            it("should fail when there is no session-id in the authorization request header", async () => {
                 const loggerSpyError = vi.spyOn(logger, "error");
                 const output = await lambdaHandler(
                     {
@@ -323,7 +322,7 @@ describe("authorization-handler.ts", () => {
                 );
                 expect(metricsSpy).toHaveBeenCalledWith("authorization_sent", 0);
             });
-            it("should should fail when no existing session is found for the current request", async () => {
+            it("should fail when no existing session is found for the current request", async () => {
                 const loggerSpyError = vi.spyOn(logger, "error");
                 const sessionId = "1";
                 const sessionNotFound = new SessionNotFoundError(sessionId);
@@ -345,7 +344,7 @@ describe("authorization-handler.ts", () => {
                 expect(metricsSpy).toHaveBeenCalledWith("authorization_sent", 0);
             });
 
-            it("should should fail when a server error occurs", async () => {
+            it("should fail when a server error occurs", async () => {
                 const loggerSpyError = vi.spyOn(logger, "error");
                 const serverError = new ServerError();
                 vi.spyOn(sessionService, "getSession").mockRejectedValueOnce(serverError);
@@ -365,6 +364,89 @@ describe("authorization-handler.ts", () => {
                 );
                 expect(metricsSpy).toHaveBeenCalledWith("authorization_sent", 0);
             });
+        });
+    });
+
+    describe("Authorization handler with the Authorization Request Type feature flag set to IPV", () => {
+        let lambdaHandler: middy.MiddyfiedHandler;
+
+        beforeEach(() => {
+            process.env.ENV_VAR_AUTHORIZATION_REQUEST_TYPE = "IPV";
+            lambdaHandler = buildLambdaHandler();
+        });
+
+        it("should return 200 with state, redirectUri, and authorizationCode from session when no query parameters provided", async () => {
+            const output = await lambdaHandler(
+                {
+                    body: {},
+                    headers: { "session-id": "1" },
+                    queryStringParameters: null,
+                } as unknown as APIGatewayProxyEvent,
+                {} as Context,
+            );
+
+            expect(output.statusCode).toBe(200);
+            const body = JSON.parse(output.body);
+            expect(body.state.value).toBe("session-state-value");
+            expect(body.redirectionURI).toBe("http://123.com");
+            expect(body.authorizationCode.value).toBe("abc");
+            expect(metricsSpy).toHaveBeenCalledWith("authorization_sent");
+        });
+
+        it("should return 200 with state, redirectUri, and authorizationCode from session even when query parameters are provided", async () => {
+            const output = await lambdaHandler(
+                {
+                    body: {},
+                    headers: { "session-id": "1" },
+                    queryStringParameters: {
+                        client_id: "query-client-id",
+                        redirect_uri: "http://query-url.com",
+                        state: "query-state",
+                    },
+                } as unknown as APIGatewayProxyEvent,
+                {} as Context,
+            );
+
+            expect(output.statusCode).toBe(200);
+            const body = JSON.parse(output.body);
+            expect(body.state.value).toBe("session-state-value");
+            expect(body.redirectionURI).toBe("http://123.com");
+        });
+
+        it("should not call the authorizationRequestValidator's validate function'", async () => {
+            const validateSpy = vi.spyOn(authorizationRequestValidator, "validate");
+
+            await lambdaHandler(
+                {
+                    body: {},
+                    headers: { "session-id": "1" },
+                    queryStringParameters: null,
+                } as unknown as APIGatewayProxyEvent,
+                {} as Context,
+            );
+
+            expect(validateSpy).not.toHaveBeenCalled();
+        });
+
+        it("should return 403 access_denied when the session has no authorization code", async () => {
+            vi.spyOn(sessionService, "getSession").mockResolvedValueOnce({
+                ...sessionItem,
+                authorizationCode: undefined,
+            } as SessionItem);
+
+            const output = await lambdaHandler(
+                {
+                    body: {},
+                    headers: { "session-id": "1" },
+                    queryStringParameters: null,
+                } as unknown as APIGatewayProxyEvent,
+                {} as Context,
+            );
+
+            expect(output.statusCode).toBe(403);
+            expect(output.body).toContain("access_denied");
+            expect(metricsSpy).toHaveBeenCalledWith("no_authorization_code");
+            expect(metricsSpy).toHaveBeenCalledWith("authorization_sent", 0);
         });
     });
 });

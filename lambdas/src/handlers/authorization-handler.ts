@@ -37,13 +37,15 @@ export class AuthorizationLambda implements LambdaInterface {
             logger.info("Session found");
             const clientConfig = configService.getClientConfig(sessionItem.clientId);
 
-            logger.info("Validating session");
-            this.authorizationRequestValidator.validate(
-                event.queryStringParameters,
-                sessionItem.clientId,
-                clientConfig?.get(ClientConfigKey.JWT_REDIRECT_URI) as string,
-            );
-            logger.info("Session validated");
+            if (process.env.ENV_VAR_AUTHORIZATION_REQUEST_TYPE === "CRI") {
+                logger.info("Validating session");
+                this.authorizationRequestValidator.validate(
+                    event.queryStringParameters,
+                    sessionItem.clientId,
+                    clientConfig?.get(ClientConfigKey.JWT_REDIRECT_URI) as string,
+                );
+                logger.info("Session validated");
+            }
 
             if (!sessionItem.authorizationCode) {
                 logger.info("No Auth Code retrieved returning Oauth access_denied");
@@ -53,12 +55,18 @@ export class AuthorizationLambda implements LambdaInterface {
 
             const authorizationResponse = {
                 state: {
-                    value: event.queryStringParameters?.["state"],
+                    value:
+                        process.env.ENV_VAR_AUTHORIZATION_REQUEST_TYPE === "IPV"
+                            ? sessionItem.state
+                            : event.queryStringParameters?.["state"],
                 },
                 authorizationCode: {
                     value: sessionItem.authorizationCode,
                 },
-                redirectionURI: event.queryStringParameters?.["redirect_uri"],
+                redirectionURI:
+                    process.env.ENV_VAR_AUTHORIZATION_REQUEST_TYPE === "IPV"
+                        ? sessionItem.redirectUri
+                        : event.queryStringParameters?.["redirect_uri"],
             };
 
             logger.info("Authorisation response created");

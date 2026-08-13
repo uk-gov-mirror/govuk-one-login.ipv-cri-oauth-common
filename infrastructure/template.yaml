@@ -9,7 +9,7 @@ Metadata:
     SpdxLicenseId: MIT
     LicenseUrl: ../LICENSE
     HomePageUrl: https://github.com/govuk-one-login/ipv-cri-oauth-common
-    SemanticVersion: 1.1.0
+    SemanticVersion: 1.2.0
     SourceCodeUrl: https://github.com/govuk-one-login/ipv-cri-oauth-common
 
 Parameters:
@@ -540,6 +540,7 @@ Resources:
             - IsUsingCommonLambdasTables
             - !Sub "{{resolve:ssm:/${CommonLambdasStackName}/SessionTableName}}"
             - !Ref SessionTable
+          ENV_VAR_AUTHORIZATION_REQUEST_TYPE: !Ref AuthorizationRequestType
       AutoPublishAlias: live
       AutoPublishAliasAllProperties: true
       Policies:
