@@ -26,7 +26,7 @@ Feature: Session API
     Then expect a status code of 400 in the response
 
   Scenario: should be able to write, read and update session information
-    Given authorization JAR for test user 681
+    Given IPV authorization JAR for test user 681
     And the Session lambda is called
     When user sends a request to session API
     Then user gets a session id
@@ -39,11 +39,18 @@ Feature: Session API
 
     When I retrieve session information
     Then expect a status code of 200 in the response
-    And The session should contain 3 fields
-    And The session should contain the field "field1" with the value "test field 1"
-    And The session should contain the field "field2" with the value "test field 2"
-    And The session should contain the field "field3" with the value "test field 3"
-    Then expect a status code of 200 in the response
+    And The session should contain the field "clientSessionId"
+    And The session should contain the field "subject"
+    And The session should contain the field "vtr"
+    And The session should contain the field "storageAccessToken"
+    And The session should contain a "sessionData" object with 3 fields
+    And The session "sessionData" should contain the field "field1" with the value "test field 1"
+    And The session "sessionData" should contain the field "field2" with the value "test field 2"
+    And The session "sessionData" should contain the field "field3" with the value "test field 3"
+    And The session should not contain the field "accessToken"
+    And The session should not contain the field "authorizationCode"
+    And The session should not contain the field "clientIpAddress"
+    And The session should not contain the field "state"
 
     When I create a new session update request
     And The session update request contains the field "field2" set to "null"
@@ -54,7 +61,15 @@ Feature: Session API
 
     When I retrieve session information
     Then expect a status code of 200 in the response
-    And The session should contain 3 fields
-    And The session should contain the field "field1" with the value "test field 1"
-    And The session should contain the field "field3" with the value "updated test field 3"
-    And The session should contain the field "field4" with the value "Test field 4"
+    And The session should contain the field "clientSessionId"
+    And The session should contain the field "subject"
+    And The session should contain the field "vtr"
+    And The session should contain the field "storageAccessToken"
+    And The session should contain a "sessionData" object with 3 fields
+    And The session "sessionData" should contain the field "field1" with the value "test field 1"
+    And The session "sessionData" should contain the field "field3" with the value "updated test field 3"
+    And The session "sessionData" should contain the field "field4" with the value "Test field 4"
+    And The session should not contain the field "accessToken"
+    And The session should not contain the field "authorizationCode"
+    And The session should not contain the field "clientIpAddress"
+    And The session should not contain the field "state"

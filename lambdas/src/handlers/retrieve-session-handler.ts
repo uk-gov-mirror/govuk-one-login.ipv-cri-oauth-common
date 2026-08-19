@@ -12,10 +12,19 @@ import { ConfigService } from "../common/config/config-service";
 import { SessionService } from "../services/session-service";
 import { SSMProvider } from "@aws-lambda-powertools/parameters/ssm";
 import { AwsClientType, createClient } from "../common/aws-client-factory";
-import { SessionItem } from "@govuk-one-login/cri-types";
+import { OAuthSessionItem } from "../types/oauth-session-item";
 
 const dynamoDbClient = createClient(AwsClientType.DYNAMO);
 const SESSION_RETRIEVED_METRIC = "session_retrieved";
+const ALLOWED_SESSION_FIELDS = [
+    "vtr",
+    "storageAccessToken",
+    "clientSessionId",
+    "persistentSessionId",
+    "subject",
+    "context",
+    "sessionData",
+] as const;
 
 export class RetrieveSessionLambda implements LambdaInterface {
     private readonly sessionService: SessionService;
@@ -37,13 +46,14 @@ export class RetrieveSessionLambda implements LambdaInterface {
     @metrics.logMetrics({ throwOnEmptyMetrics: false, captureColdStartMetric: true })
     public async handler(_event: APIGatewayProxyEvent, _context: unknown): Promise<APIGatewayProxyResult> {
         logger.info("RetrieveSession lambda triggered", { event: _event });
-        const sessionItem = _event.body as never as SessionItem;
+        const sessionItem = _event.body as never as OAuthSessionItem;
+        const responseBody = Object.fromEntries(ALLOWED_SESSION_FIELDS.map((key) => [key, sessionItem[key]]));
 
         captureMetric(SESSION_RETRIEVED_METRIC);
 
         return {
             statusCode: 200,
-            body: JSON.stringify(sessionItem.sessionData ?? {}),
+            body: JSON.stringify(responseBody),
         };
     }
 }

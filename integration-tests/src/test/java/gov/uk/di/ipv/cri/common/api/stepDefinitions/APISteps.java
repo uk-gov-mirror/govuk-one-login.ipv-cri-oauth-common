@@ -323,25 +323,50 @@ public class APISteps {
     @And("I send the session update request")
     public void iSendTheSessionUpdateRequest() throws IOException, URISyntaxException, InterruptedException {
         sessionUpdateRequestBody = objectMapper.writeValueAsString(sessionUpdateRequestBodyMap);
-        response = IpvCoreStubUtil.sendUpdateSessionRequest(devSessionUri + "/data", currentSessionId, sessionUpdateRequestBody);
+        response = IpvCoreStubUtil.sendUpdateSessionRequest(devSessionUri, currentSessionId, sessionUpdateRequestBody);
     }
 
     @When("I retrieve session information")
     public void iRetrieveSessionInformation() throws URISyntaxException, IOException, InterruptedException {
-        response = IpvCoreStubUtil.sendGetSessionRequest(devSessionUri + "/data", currentSessionId);
+        response = IpvCoreStubUtil.sendGetSessionRequest(devSessionUri, currentSessionId);
     }
 
     @And("The session should contain {int} fields")
     public void theSessionShouldContainFields(int size) throws IOException {
-        responseBodyMap = objectMapper.readValue(response.body(), new TypeReference<>() {});
-        assertNotNull(responseBodyMap);
-        assertEquals(size, responseBodyMap.size());
+        Map<String, Object> responseBody = objectMapper.readValue(response.body(), new TypeReference<Map<String, Object>>() {});
+        assertNotNull(responseBody);
+        assertEquals(size, responseBody.size());
     }
 
-    @And("The session should contain the field {string} with the value {string}")
-    public void theSessionShouldContainTheFieldWithTheValue(String field, String value) throws IOException {
-        responseBodyMap = objectMapper.readValue(response.body(), new TypeReference<>() {});
-        assertTrue(responseBodyMap.containsKey(field));
-        assertEquals(value, responseBodyMap.get(field));
+    @And("The session should contain a {string} object with {int} fields")
+    public void theSessionShouldContainAnObjectWithFields(String objectKey, int size) throws IOException {
+        Map<String, Object> responseBody = objectMapper.readValue(response.body(), new TypeReference<Map<String, Object>>() {});
+        assertTrue(responseBody.containsKey(objectKey));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> nestedObject = (Map<String, Object>) responseBody.get(objectKey);
+        assertNotNull(nestedObject);
+        assertEquals(size, nestedObject.size());
+    }
+
+    @And("The session {string} should contain the field {string} with the value {string}")
+    public void theSessionNestedObjectShouldContainTheFieldWithTheValue(String objectKey, String field, String value) throws IOException {
+        Map<String, Object> responseBody = objectMapper.readValue(response.body(), new TypeReference<Map<String, Object>>() {});
+        @SuppressWarnings("unchecked")
+        Map<String, Object> nestedObject = (Map<String, Object>) responseBody.get(objectKey);
+        assertNotNull(nestedObject);
+        assertTrue(nestedObject.containsKey(field));
+        assertEquals(value, nestedObject.get(field));
+    }
+
+    @And("The session should not contain the field {string}")
+    public void theSessionShouldNotContainTheField(String field) throws IOException {
+        Map<String, Object> responseBody = objectMapper.readValue(response.body(), new TypeReference<Map<String, Object>>() {});
+        assertFalse(responseBody.containsKey(field));
+    }
+
+    @And("The session should contain the field {string}")
+    public void theSessionShouldContainTheField(String field) throws IOException {
+        Map<String, Object> responseBody = objectMapper.readValue(response.body(), new TypeReference<Map<String, Object>>() {});
+        assertTrue(responseBody.containsKey(field));
     }
 }
