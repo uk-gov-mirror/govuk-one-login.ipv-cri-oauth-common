@@ -1415,6 +1415,13 @@ Resources:
                   "dynamodb:Attributes":
                     - sessionId
                     - sessionData
+        - KMSDecryptPolicy:
+            KeyId: !Ref DynamoTablesEncryptionKey
+        - !If
+          - IsCommonLambdasUsingCMK
+          - KMSDecryptPolicy:
+              KeyId: !Sub "{{resolve:ssm:/${CommonLambdasStackName}/DynamoDBCustomerManagedKeyID}}"
+          - !Ref AWS::NoValue
         - !If
           - IsUsingCommonLambdasTables
           - Statement:
